@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { PlaudClient } from '../src/client.js';
+import { PlaudClient, PlaudApiError } from '../src/client.js';
 import { PlaudAuth } from '../src/auth.js';
 import { PlaudConfig } from '../src/config.js';
 import * as fs from 'fs';
@@ -83,6 +83,62 @@ describe('PlaudClient', () => {
 
     const user = await client.getUserInfo();
     expect(user.nickname).toBe('Sergi');
+  });
+
+  it('throws on an app-level error returned as HTTP 200', async () => {
+    // The exact shape a rejected token produced against /file/simple/web on 2026-07-31.
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: -3901, msg: 'token type does not match parse mode' }),
+    });
+
+    await expect(client.listRecordings()).rejects.toThrow(PlaudApiError);
+  });
+
+  it('does not report a rejected credential as an empty account', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: -3901, msg: 'token type does not match parse mode' }),
+    });
+
+    // The regression: this used to resolve to [] and read as "no recordings".
+    const err = await client.listRecordings().catch(e => e);
+    expect(err).toBeInstanceOf(PlaudApiError);
+    expect(err.status).toBe(-3901);
+    expect(err.isAuthFailure).toBe(true);
+    expect(err.message).toContain('token type does not match parse mode');
+  });
+
+  it('flags a wrong password as an auth failure', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: -2, msg: 'wrong account or password' }),
+    });
+
+    const err = await client.getUserInfo().catch(e => e);
+    expect(err).toBeInstanceOf(PlaudApiError);
+    expect(err.isAuthFailure).toBe(true);
+  });
+
+  it('does not flag a non-auth error as an auth failure', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: -1234, msg: 'something else' }),
+    });
+
+    const err = await client.listRecordings().catch(e => e);
+    expect(err).toBeInstanceOf(PlaudApiError);
+    expect(err.isAuthFailure).toBe(false);
+  });
+
+  it('leaves a genuinely empty account as an empty list', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 0, data_file_list: [] }),
+    });
+
+    // The distinction the whole change exists to preserve.
+    await expect(client.listRecordings()).resolves.toEqual([]);
   });
 
   it('handles region mismatch', async () => {
