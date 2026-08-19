@@ -26,9 +26,13 @@ export class AuthManager {
     return this.auth.getToken();
   }
 
-  /** Check if credentials exist in ~/.plaud/config.json. */
+  /**
+   * Whether the plugin can talk to Plaud: either a password is stored (token
+   * auto-refresh) or an unexpired token is present (token-only mode, e.g.
+   * Google Sign-In users, who have no credentials to check).
+   */
   isConfigured(): boolean {
-    return !!this.config.getCredentials();
+    return this.auth.isUsable();
   }
 
   /** Get the stored email (for display in settings). */
@@ -36,9 +40,14 @@ export class AuthManager {
     return this.config.getCredentials()?.email;
   }
 
-  /** Get the stored region. */
+  /** Get the region, inferred from the token when there are no credentials. */
   getRegion(): string {
-    return this.config.getCredentials()?.region ?? 'eu';
+    return this.auth.getRegion();
+  }
+
+  /** Whether we are running off a pasted token with no password to refresh it. */
+  isTokenOnly(): boolean {
+    return !this.auth.canLogin();
   }
 
   /** How much time remains on the cached token. */

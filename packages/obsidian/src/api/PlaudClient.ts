@@ -62,10 +62,12 @@ export class PlaudClient {
     return this.auth.getToken();
   }
 
-  /** Check if credentials are configured in ~/.plaud/config.json. */
+  /**
+   * Whether ~/.plaud/config.json can reach Plaud — a stored password, or an
+   * unexpired token in token-only mode.
+   */
   hasCredentials(): boolean {
-    const config = new PlaudConfig();
-    return !!config.getCredentials();
+    return this.auth.isUsable();
   }
 
   /**

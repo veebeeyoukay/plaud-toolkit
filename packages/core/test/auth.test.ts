@@ -133,12 +133,12 @@ describe('PlaudAuth', () => {
     expect(mockFetch).toHaveBeenCalledOnce();
   });
 
-  it('throws when no credentials stored', async () => {
+  it('throws actionable guidance when neither credentials nor token exist', async () => {
     const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plaud-empty-'));
     const emptyConfig = new PlaudConfig(emptyDir);
     const emptyAuth = new PlaudAuth(emptyConfig);
 
-    await expect(emptyAuth.getToken()).rejects.toThrow('No credentials');
+    await expect(emptyAuth.getToken()).rejects.toThrow('No Plaud token found');
     fs.rmSync(emptyDir, { recursive: true, force: true });
   });
 
@@ -149,5 +149,79 @@ describe('PlaudAuth', () => {
     });
 
     await expect(auth.getToken()).rejects.toThrow('wrong account or password');
+  });
+  // --- Token-only mode (no password stored, e.g. Google Sign-In users) ---
+  describe('token-only mode', () => {
+    let tokenDir: string;
+    let tokenConfig: PlaudConfig;
+    let tokenAuth: PlaudAuth;
+
+    const makeToken = (iat: number, exp: number, region = 'aws:eu-central-1') => {
+      const payload = Buffer.from(JSON.stringify({ sub: 'abc', exp, iat, region })).toString('base64url');
+      return `eyJhbGciOiJIUzI1NiJ9.${payload}.sig`;
+    };
+
+    beforeEach(() => {
+      tokenDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plaud-token-'));
+      tokenConfig = new PlaudConfig(tokenDir);
+      tokenAuth = new PlaudAuth(tokenConfig);
+    });
+
+    afterEach(() => {
+      fs.rmSync(tokenDir, { recursive: true, force: true });
+    });
+
+    it('serves a pasted token and never logs in', async () => {
+      const iat = Math.floor(Date.now() / 1000);
+      const exp = iat + 30 * 86400;
+      const token = makeToken(iat, exp);
+      tokenConfig.saveToken({ accessToken: token, tokenType: 'bearer', issuedAt: iat * 1000, expiresAt: exp * 1000 });
+
+      expect(await tokenAuth.getToken()).toBe(token);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('keeps using a near-expiry token instead of minting a session', async () => {
+      // With a password this would refresh; token-only mode has nothing to
+      // refresh with, so the still-valid token is used rather than failing.
+      const iat = Math.floor(Date.now() / 1000) - 30 * 86400 + 600;
+      const exp = iat + 30 * 86400; // 10 minutes left
+      const token = makeToken(iat, exp);
+      tokenConfig.saveToken({ accessToken: token, tokenType: 'bearer', issuedAt: iat * 1000, expiresAt: exp * 1000 });
+
+      expect(await tokenAuth.getToken()).toBe(token);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('throws actionable guidance once the token is expired', async () => {
+      const exp = Math.floor(Date.now() / 1000) - 1000;
+      const token = makeToken(exp - 86400, exp);
+      tokenConfig.saveToken({ accessToken: token, tokenType: 'bearer', issuedAt: (exp - 86400) * 1000, expiresAt: exp * 1000 });
+
+      await expect(tokenAuth.getToken()).rejects.toThrow('Your Plaud token has expired');
+      await expect(tokenAuth.refreshToken()).rejects.toThrow('web.plaud.ai');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('reports usability and infers the region from the token claim', () => {
+      const iat = Math.floor(Date.now() / 1000);
+      const exp = iat + 30 * 86400;
+      expect(tokenAuth.isUsable()).toBe(false);
+      expect(tokenAuth.canLogin()).toBe(false);
+      expect(tokenAuth.getRegion()).toBe('us'); // no credentials, no token
+
+      tokenConfig.saveToken({ accessToken: makeToken(iat, exp), tokenType: 'bearer', issuedAt: iat * 1000, expiresAt: exp * 1000 });
+      expect(tokenAuth.isUsable()).toBe(true);
+      expect(tokenAuth.getRegion()).toBe('eu');
+
+      tokenConfig.saveToken({ accessToken: makeToken(iat, exp, 'aws:us-east-1'), tokenType: 'bearer', issuedAt: iat * 1000, expiresAt: exp * 1000 });
+      expect(tokenAuth.getRegion()).toBe('us');
+    });
+
+    it('explains itself when credentials exist without a password', async () => {
+      tokenConfig.saveCredentials({ email: 'google@plaud.ai', region: 'eu' });
+      await expect(tokenAuth.login()).rejects.toThrow('No password stored for google@plaud.ai');
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
   });
 });

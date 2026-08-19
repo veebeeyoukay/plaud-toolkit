@@ -1,6 +1,11 @@
 export interface PlaudCredentials {
   email: string;
-  password: string;
+  /**
+   * Omitted for token-only accounts (e.g. Google Sign-In users), who have no
+   * Plaud password to exchange for a token and instead paste one extracted
+   * from web.plaud.ai's localStorage into ~/.plaud/config.json.
+   */
+  password?: string;
   region: 'us' | 'eu';
 }
 
