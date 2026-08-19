@@ -17,7 +17,7 @@ export class PlaudClient {
     return BASE_URLS[this.region] ?? BASE_URLS['us'];
   }
 
-  private async request(path: string, options?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<any> {
+  private async request(path: string, options?: { method?: string; headers?: Record<string, string>; body?: string }, retriedAuth = false): Promise<any> {
     const token = await this.auth.getToken();
     const url = `${this.baseUrl}${path}`;
     const res = await this.requester({
@@ -31,6 +31,15 @@ export class PlaudClient {
       body: options?.body,
     });
 
+    // The cached token was rejected — log in once to mint a replacement, then
+    // retry. Recovering here (rather than pre-emptively re-logging in) keeps us
+    // to one new Plaud session per genuinely dead token, so the phone app's
+    // session survives normal syncing.
+    if (res.status === 401 && !retriedAuth) {
+      await this.auth.refreshToken();
+      return this.request(path, options, true);
+    }
+
     if (!res.ok) {
       throw new Error(`Plaud API error: ${res.status}`);
     }
@@ -41,7 +50,7 @@ export class PlaudClient {
     if (data?.status === -302 && data?.data?.domains?.api) {
       const domain: string = data.data.domains.api;
       this.region = domain.includes('euc1') ? 'eu' : 'us';
-      return this.request(path, options);
+      return this.request(path, options, retriedAuth);
     }
 
     return data;
@@ -85,11 +94,17 @@ export class PlaudClient {
   }
 
   async downloadAudio(id: string): Promise<ArrayBuffer> {
-    const token = await this.auth.getToken();
-    const res = await this.requester({
+    let res = await this.requester({
       url: `${this.baseUrl}/file/download/${id}`,
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 'Authorization': `Bearer ${await this.auth.getToken()}` },
     });
+    if (res.status === 401) {
+      await this.auth.refreshToken();
+      res = await this.requester({
+        url: `${this.baseUrl}/file/download/${id}`,
+        headers: { 'Authorization': `Bearer ${await this.auth.getToken()}` },
+      });
+    }
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
     return res.arrayBuffer();
   }

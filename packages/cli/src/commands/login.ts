@@ -19,7 +19,11 @@ export async function loginCommand(_args: string[]): Promise<void> {
 
     const auth = new PlaudAuth(config);
     const token = await auth.login();
-    console.log(`Login successful! Token valid for ~300 days.`);
+    const stored = config.getToken();
+    const days = stored
+      ? Math.floor((stored.expiresAt - Date.now()) / (24 * 60 * 60 * 1000))
+      : 0;
+    console.log(`Login successful! Token valid for ~${days} days.`);
   } finally {
     rl.close();
   }

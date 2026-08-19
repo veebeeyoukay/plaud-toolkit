@@ -4,7 +4,9 @@ import type PlaudPlugin from '../../main';
 
 /**
  * AuthManager — delegates to @plaud/core for automatic token management.
- * Tokens last ~300 days and auto-refresh when within 30 days of expiry.
+ * Plaud tokens currently last ~30 days; the cached token is reused until it is
+ * nearly expired (see @plaud/core's PlaudAuth) because every password login
+ * mints a new Plaud session and evicts the one the phone app is holding.
  * Credentials are stored in ~/.plaud/config.json (shared with plaud-cli).
  */
 export class AuthManager {

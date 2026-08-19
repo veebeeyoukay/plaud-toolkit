@@ -86,6 +86,53 @@ describe('PlaudAuth', () => {
     expect(mockFetch).toHaveBeenCalledOnce();
   });
 
+  it('reuses a freshly issued 30-day token instead of logging in again', async () => {
+    // Regression: the refresh buffer was a flat 30 days while Plaud issues
+    // 30-day tokens, so every request re-logged in — minting a new Plaud
+    // session each time and kicking the phone app off the account.
+    const iat = Math.floor(Date.now() / 1000);
+    const exp = iat + 30 * 86400;
+    const payload = Buffer.from(JSON.stringify({ sub: 'abc', exp, iat })).toString('base64url');
+    const fakeToken = `eyJhbGciOiJIUzI1NiJ9.${payload}.sig`;
+
+    config.saveToken({
+      accessToken: fakeToken,
+      tokenType: 'bearer',
+      issuedAt: iat * 1000,
+      expiresAt: exp * 1000,
+    });
+
+    expect(await auth.getToken()).toBe(fakeToken);
+    expect(await auth.getToken()).toBe(fakeToken);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('refreshes a 30-day token once it is within hours of expiry', async () => {
+    const iat = Math.floor(Date.now() / 1000) - 30 * 86400 + 600;
+    const exp = iat + 30 * 86400; // 10 minutes left
+    const payload = Buffer.from(JSON.stringify({ sub: 'abc', exp, iat })).toString('base64url');
+    const stale = `eyJhbGciOiJIUzI1NiJ9.${payload}.sig`;
+
+    config.saveToken({
+      accessToken: stale,
+      tokenType: 'bearer',
+      issuedAt: iat * 1000,
+      expiresAt: exp * 1000,
+    });
+
+    const newIat = Math.floor(Date.now() / 1000);
+    const newPayload = Buffer.from(JSON.stringify({ sub: 'abc', exp: newIat + 30 * 86400, iat: newIat })).toString('base64url');
+    const fresh = `eyJhbGciOiJIUzI1NiJ9.${newPayload}.sig`;
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 0, access_token: fresh, token_type: 'bearer' }),
+    });
+
+    expect(await auth.getToken()).toBe(fresh);
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+
   it('throws when no credentials stored', async () => {
     const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plaud-empty-'));
     const emptyConfig = new PlaudConfig(emptyDir);
