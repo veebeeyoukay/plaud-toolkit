@@ -40,6 +40,13 @@ export class PlaudClient {
       return this.request(path, options);
     }
 
+    // Plaud reports auth failures as HTTP 200 with a negative status
+    // (e.g. -3901 "token type does not match parse mode"). Without this the
+    // callers read the error body as an empty list and sync reports "up to date".
+    if (typeof data?.status === 'number' && data.status < 0) {
+      throw new Error(`Plaud API error: status ${data.status} ${data.msg ?? ''}`.trim());
+    }
+
     return data;
   }
 
