@@ -36,9 +36,20 @@ export interface PlaudRecording {
   serial_number: string;
 }
 
+export interface PlaudTranscriptSegment {
+  content: string;
+  start_time: number;        // ms from recording start
+  end_time: number;          // ms
+  speaker: string;           // resolved name when voice-printed, else "Speaker N"
+  original_speaker: string;  // raw diarization label, "Speaker N"
+  embeddingKey?: string;
+}
+
 export interface PlaudRecordingDetail extends PlaudRecording {
-  transcript: string;
+  transcript: string;                       // AI summary text
   summary?: string;
+  rawTranscript: PlaudTranscriptSegment[];  // verbatim diarized segments
+  speakers: string[];                       // distinct speaker names in this recording
 }
 
 export interface PlaudUserInfo {
